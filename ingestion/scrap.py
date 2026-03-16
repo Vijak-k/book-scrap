@@ -9,11 +9,24 @@ import json
 import html
 import requests
 from bs4 import BeautifulSoup
+import os
 
-DB_NAME = "naiin_inventory.duckdb"
+# 1. หาตำแหน่งของไฟล์ .py ที่กำลังรันอยู่
+current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# โหลดข้อมูลและจัดการ Type ให้ตรงกับ Schema (ใช้ str สำหรับ ID)
-prod_url = pd.read_csv('prod_urls.csv')
+# 2. ถอยหลัง 1 step ไปที่ book-scrap แล้วเข้าไปที่ data/
+DB_NAME = os.path.join(current_dir, "..", "data", "naiin_inventory.duckdb")
+
+try:
+    conn = duckdb.connect(DB_NAME)
+    print(f"✅ เชื่อมต่อสำเร็จ: {DB_NAME}")
+    conn.close()
+except Exception as e:
+    print(f"❌ เชื่อมต่อไม่สำเร็จ: {e}")
+
+# Load products urls
+csv_name = os.path.join(current_dir, "..", "data", "prod_urls.csv")
+prod_url = pd.read_csv(csv_name)
 prod_url = prod_url.drop(columns=['status', 'discovered_at'])
 prod_url['product_id'] = prod_url['product_id'].astype(int)
 
@@ -106,7 +119,7 @@ def run_main_pipeline(df_examples):
     
     # 1. สร้าง Table
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS product_details (
+        CREATE TABLE IF NOT EXISTS raw_product_details (
             product_id INTEGER PRIMARY KEY,
             url VARCHAR,
             Title VARCHAR,
@@ -128,7 +141,7 @@ def run_main_pipeline(df_examples):
 
     # 2. Checkpoint
     try:
-        finished_ids = conn.execute("SELECT product_id FROM product_details").df()['product_id'].tolist()
+        finished_ids = conn.execute("SELECT product_id FROM raw_product_details").df()['product_id'].tolist()
     except:
         finished_ids = []
     
@@ -162,7 +175,7 @@ def run_main_pipeline(df_examples):
                 if len(batch_data) >= 20:
                     batch_df = pd.DataFrame(batch_data)
                     batch_df = batch_df[cols] # บังคับลำดับคอลัมน์
-                    conn.execute("INSERT INTO product_details SELECT * FROM batch_df ON CONFLICT DO NOTHING")
+                    conn.execute("INSERT INTO raw_product_details SELECT * FROM batch_df ON CONFLICT DO NOTHING")
                     batch_data = [] 
                     
             except Exception as e:
@@ -178,7 +191,7 @@ def run_main_pipeline(df_examples):
         if batch_data:
             batch_df = pd.DataFrame(batch_data)
             batch_df = batch_df[cols]
-            conn.execute("INSERT INTO product_details SELECT * FROM batch_df ON CONFLICT DO NOTHING")
+            conn.execute("INSERT INTO raw_product_details SELECT * FROM batch_df ON CONFLICT DO NOTHING")
         
         conn.close()
         print("\n✅ Pipeline closed safely.")
