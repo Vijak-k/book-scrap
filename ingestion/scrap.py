@@ -141,7 +141,11 @@ def run_main_pipeline(df_examples):
 
     # 2. Checkpoint
     try:
-        finished_ids = conn.execute("SELECT product_id FROM raw_product_details").df()['product_id'].tolist()
+        finished_ids = conn.execute("""
+                SELECT product_id 
+                FROM raw_product_details 
+                WHERE title IS NOT NULL AND title != 'N/A'
+            """).df()['product_id'].tolist()
     except:
         finished_ids = []
     
