@@ -93,25 +93,49 @@ def scrape(url):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://www.naiin.com/',
     }
-
-    time.sleep(random.uniform(0.8, 1.2))
+    
+    time.sleep(random.uniform(0.8,1.2)) # เพิ่มเวลาหน่อยกันโดนบล็อก
     response = requests.get(url, headers=headers, timeout=10)
+    html_text = response.text
     soup = BeautifulSoup(response.text, 'lxml')
     
-    data = {'url': url}
+    # ข้อมูลพื้นฐานจาก Metadata
+    # 1. วิธีเดิม (Fast & Native) สำหรับฟิลด์ที่ไม่มีปัญหา
     meta_map = {
         'Title': soup.find('meta', property='og:title'),
         'Price_Full': soup.find('meta', property='og:product:price:amount'),
         'Barcode': soup.find('meta', property='book:isbn'),
         'Release_Date': soup.find('meta', property='book:release_date'),
-        'keywords': soup.find('meta', attrs={'name': 'keywords'}),
     }
-
+    
+    data = {'url': url}
     for key, tag in meta_map.items():
-        data[key] = tag['content'] if tag else "N/A"
+        data[key] = tag['content'].strip() if tag else "N/A"
 
+# ใช้ Regex ที่มองหาจุดสิ้นสุดคือ "> หรือ /> (จุดปิดแท็ก meta)
+# โดยเก็บทุกอย่าง (.*) ที่อยู่ระหว่าง content=" จนถึงจุดนั้น
+    kw_pattern = r'<meta[^>]*name="keywords"[^>]*content="(.*)"\s*/?>'
+    kw_match = re.search(kw_pattern, html_text, re.IGNORECASE | re.DOTALL)
+
+    if kw_match:
+        # raw_content จะได้ข้อมูลมาจนถึง " ตัวสุดท้ายก่อนปิดแท็ก
+        raw_content = kw_match.group(1).strip()
+        
+        # เนื่องจากเราใช้ (.*) แบบ Greedy มันอาจจะกินพื้นที่ไปจนถึงแท็กอื่นที่ปิดด้วย "> เหมือนกัน
+        # เราจะแก้ด้วยการเอาสตริงที่ได้มาตัด (split) ด้วย "> อีกรอบเพื่อความชัวร์
+        clean_content = raw_content.split('">')[0]
+        
+        # สุดท้าย ถ้ามีเครื่องหมาย " ปิดท้ายสตริงที่เหลืออยู่ (ซึ่งเป็นตัวปิดของ content) ให้เอาออก
+        data['keywords'] = clean_content.rstrip('"')
+    else:
+        data['keywords'] = "N/A"
+    # --- ส่วนที่แก้ปัญหา Error ---
+    # ส่ง response.text (String) เข้าไป
     extra_info = extract_extra_info(response.text)
+    
+    # รวมข้อมูลเข้าด้วยกัน
     data.update(extra_info)
+    
     return data
 
 def run_main_pipeline(df_examples):
@@ -178,6 +202,10 @@ def run_main_pipeline(df_examples):
                 # 4. Batch Commit (ย้ายเข้ามาอยู่ใน Loop แล้ว)
                 if len(batch_data) >= 20:
                     batch_df = pd.DataFrame(batch_data)
+                    # fill missing columns
+                    for col in cols:
+                        if col not in batch_df.columns:
+                            batch_df[col] = None
                     batch_df = batch_df[cols] # บังคับลำดับคอลัมน์
                     conn.execute("INSERT INTO raw_product_details SELECT * FROM batch_df ON CONFLICT DO NOTHING")
                     batch_data = [] 
@@ -194,6 +222,9 @@ def run_main_pipeline(df_examples):
         # เก็บตก Batch สุดท้าย
         if batch_data:
             batch_df = pd.DataFrame(batch_data)
+            for col in cols:
+                if col not in batch_df.columns:
+                    batch_df[col] = None
             batch_df = batch_df[cols]
             conn.execute("INSERT INTO raw_product_details SELECT * FROM batch_df ON CONFLICT DO NOTHING")
         
