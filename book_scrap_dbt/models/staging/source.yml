@@ -1,0 +1,7 @@
+version: 2
+sources:
+  - name: raw_data
+    description: "Raw data scrapped from https://www.naiin.com/"
+    schema: main
+    tables:
+      - name: raw_product_details
