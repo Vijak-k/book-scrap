@@ -94,48 +94,58 @@ def scrape(url):
         'Referer': 'https://www.naiin.com/',
     }
     
-    time.sleep(random.uniform(0.8,1.2)) # เพิ่มเวลาหน่อยกันโดนบล็อก
-    response = requests.get(url, headers=headers, timeout=10)
-    html_text = response.text
-    soup = BeautifulSoup(response.text, 'lxml')
-    
-    # ข้อมูลพื้นฐานจาก Metadata
-    # 1. วิธีเดิม (Fast & Native) สำหรับฟิลด์ที่ไม่มีปัญหา
-    meta_map = {
-        'Title': soup.find('meta', property='og:title'),
-        'Price_Full': soup.find('meta', property='og:product:price:amount'),
-        'Barcode': soup.find('meta', property='book:isbn'),
-        'Release_Date': soup.find('meta', property='book:release_date'),
+    # เตรียมข้อมูลตั้งต้น
+    data = {
+        'url': url,
+        'status_code': None,
+        'Title': "N/A",
+        'Price_Full': "N/A",
+        'Barcode': "N/A",
+        'Release_Date': "N/A",
+        'keywords': "N/A"
     }
     
-    data = {'url': url}
-    for key, tag in meta_map.items():
-        data[key] = tag['content'].strip() if tag else "N/A"
-
-# ใช้ Regex ที่มองหาจุดสิ้นสุดคือ "> หรือ /> (จุดปิดแท็ก meta)
-# โดยเก็บทุกอย่าง (.*) ที่อยู่ระหว่าง content=" จนถึงจุดนั้น
-    kw_pattern = r'<meta[^>]*name="keywords"[^>]*content="(.*)"\s*/?>'
-    kw_match = re.search(kw_pattern, html_text, re.IGNORECASE | re.DOTALL)
-
-    if kw_match:
-        # raw_content จะได้ข้อมูลมาจนถึง " ตัวสุดท้ายก่อนปิดแท็ก
-        raw_content = kw_match.group(1).strip()
+    try:
+        time.sleep(1.5)
+        response = requests.get(url, headers=headers, timeout=10)
+        data['status_code'] = response.status_code
         
-        # เนื่องจากเราใช้ (.*) แบบ Greedy มันอาจจะกินพื้นที่ไปจนถึงแท็กอื่นที่ปิดด้วย "> เหมือนกัน
-        # เราจะแก้ด้วยการเอาสตริงที่ได้มาตัด (split) ด้วย "> อีกรอบเพื่อความชัวร์
-        clean_content = raw_content.split('">')[0]
+        # ถ้า status ไม่ใช่ 200 (เช่น 404) ให้คืนค่าเลย ไม่ต้องเสียเวลา parse
+        if response.status_code != 200:
+            return data
+
+        html_text = response.text
+        soup = BeautifulSoup(html_text, 'lxml')
         
-        # สุดท้าย ถ้ามีเครื่องหมาย " ปิดท้ายสตริงที่เหลืออยู่ (ซึ่งเป็นตัวปิดของ content) ให้เอาออก
-        data['keywords'] = clean_content.rstrip('"')
-    else:
-        data['keywords'] = "N/A"
-    # --- ส่วนที่แก้ปัญหา Error ---
-    # ส่ง response.text (String) เข้าไป
-    extra_info = extract_extra_info(response.text)
-    
-    # รวมข้อมูลเข้าด้วยกัน
-    data.update(extra_info)
-    
+        # 1. ดึง Metadata ปกติ
+        meta_map = {
+            'Title': soup.find('meta', property='og:title'),
+            'Price_Full': soup.find('meta', property='og:product:price:amount'),
+            'Barcode': soup.find('meta', property='book:isbn'),
+            'Release_Date': soup.find('meta', property='book:release_date'),
+        }
+        
+        for key, tag in meta_map.items():
+            if tag and tag.has_attr('content'):
+                data[key] = tag['content'].strip()
+
+        # 2. ดึง Keywords ด้วย Greedy Regex
+        kw_pattern = r'<meta[^>]*name="keywords"[^>]*content="(.*)"\s*/?>'
+        kw_match = re.search(kw_pattern, html_text, re.IGNORECASE | re.DOTALL)
+
+        if kw_match:
+            raw_content = kw_match.group(1).strip()
+            clean_content = raw_content.split('">')[0]
+            data['keywords'] = clean_content.rstrip('"')
+
+        # 3. ดึง Extra Info (Table/Rating)
+        extra_info = extract_extra_info(html_text)
+        data.update(extra_info)
+
+    except Exception as e:
+        print(f"  [Request Error] {url}: {e}")
+        data['status_code'] = 999 # กำหนดรหัสพิเศษสำหรับ Network Error
+        
     return data
 
 def run_main_pipeline(df_examples):
@@ -146,6 +156,7 @@ def run_main_pipeline(df_examples):
         CREATE TABLE IF NOT EXISTS raw_product_details (
             product_id INTEGER PRIMARY KEY,
             url VARCHAR,
+            status_code INTEGER,
             Title VARCHAR,
             Price_Full VARCHAR,
             Barcode VARCHAR,
@@ -168,7 +179,7 @@ def run_main_pipeline(df_examples):
         finished_ids = conn.execute("""
                 SELECT product_id 
                 FROM raw_product_details 
-                WHERE title IS NOT NULL AND title != 'N/A'
+                WHERE title IS NOT NULL OR status_code = 404
             """).df()['product_id'].tolist()
     except:
         finished_ids = []
@@ -178,7 +189,7 @@ def run_main_pipeline(df_examples):
     print(f"📦 Total: {len(df_examples)} | Finished: {len(finished_ids)} | Remaining: {len(targets)}")
 
     batch_data = []
-    cols = ['product_id', 'url', 'Title', 'Price_Full', 
+    cols = ['product_id', 'url', 'status_code','Title', 'Price_Full', 
             'Barcode', 'Release_Date', 'keywords',
             'AverageRating', 'TotalRating', 'NumberOfPage', 
             'Width', 'Height', 'Thick', 'GrossWeightKG', 
