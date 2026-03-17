@@ -15,7 +15,7 @@ import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # 2. ถอยหลัง 1 step ไปที่ book-scrap แล้วเข้าไปที่ data/
-DB_NAME = os.path.join(current_dir, "..", "data", "naiin_inventory.duckdb")
+DB_NAME = os.path.join(current_dir, "..", "data", "naiin_products.duckdb")
 
 try:
     conn = duckdb.connect(DB_NAME)
@@ -102,11 +102,16 @@ def scrape(url):
         'Price_Full': "N/A",
         'Barcode': "N/A",
         'Release_Date': "N/A",
-        'keywords': "N/A"
+        'keywords': "N/A",
+        'product_type': "N/A",
+        'author': "N/A",
+        'publisher': "N/A",
+        'category_lv1': "N/A",
+        'category_lv2': "N/A"
     }
     
     try:
-        time.sleep(1.5)
+        time.sleep(random.uniform(0.8,1.2))
         response = requests.get(url, headers=headers, timeout=10)
         data['status_code'] = response.status_code
         
@@ -142,9 +147,43 @@ def scrape(url):
         extra_info = extract_extra_info(html_text)
         data.update(extra_info)
 
+        # 4. ดึง Product Type จาก Breadcrumbs ---
+        data['product_type'] = "N/A" # ค่าตั้งต้น
+        breadcrumb_div = soup.find('div', class_='breadcrumbs')
+
+        if breadcrumb_div:
+            # หา <a> ทั้งหมดใน breadcrumbs
+            links = breadcrumb_div.find_all('a')
+            # ปกติ links[0] คือ "หน้าแรก", links[1] คือ "Product Type"
+            if len(links) >= 2:
+                data['product_type'] = links[1].get_text(strip=True)
+        
+        # 5. ดึงข้อมูล ผู้เขียน, สำนักพิมพ์, หมวดหมู่ (ส่วนที่เพิ่มใหม่)
+        container = soup.find('div', class_='bookdetail-container')
+        if container:
+            labels = container.find_all('label', class_='product-label')
+            for label in labels:
+                text = label.get_text(strip=True)
+                # หาแท็ก <a> ที่อยู่ถัดจาก label
+                value_tag = label.find_next_sibling('a', class_='link-book-detail')
+                
+                if value_tag:
+                    value = value_tag.get_text(strip=True)
+                    if "ผู้เขียน:" in text:
+                        data['author'] = value
+                    elif "สำนักพิมพ์:" in text:
+                        data['publisher'] = value
+                    elif "หมวดหมู่:" in text:
+                        data['category_lv1'] = value
+                        # หาหมวดหมู่ย่อย (ถ้ามี) ซึ่งจะเป็น <a> ตัวถัดไป
+                        lv2_tag = value_tag.find_next_sibling('a', class_='link-book-detail')
+                        if lv2_tag:
+                            data['category_lv2'] = lv2_tag.get_text(strip=True)
+
     except Exception as e:
         print(f"  [Request Error] {url}: {e}")
         data['status_code'] = 999 # กำหนดรหัสพิเศษสำหรับ Network Error
+        data['Title'] = None
         
     return data
 
@@ -162,6 +201,11 @@ def run_main_pipeline(df_examples):
             Barcode VARCHAR,
             Release_Date VARCHAR,
             keywords VARCHAR,
+            product_type VARCHAR,
+            author VARCHAR,
+            publisher VARCHAR,
+            category_lv1 VARCHAR,
+            category_lv2 VARCHAR,
             AverageRating DOUBLE,
             TotalRating INTEGER,
             NumberOfPage INTEGER,
@@ -189,11 +233,14 @@ def run_main_pipeline(df_examples):
     print(f"📦 Total: {len(df_examples)} | Finished: {len(finished_ids)} | Remaining: {len(targets)}")
 
     batch_data = []
-    cols = ['product_id', 'url', 'status_code','Title', 'Price_Full', 
+    cols = [
+            'product_id', 'url', 'status_code', 'Title', 'Price_Full', 
             'Barcode', 'Release_Date', 'keywords',
+            'product_type', 'author', 'publisher', 'category_lv1', 'category_lv2',
             'AverageRating', 'TotalRating', 'NumberOfPage', 
             'Width', 'Height', 'Thick', 'GrossWeightKG', 
-            'FileSizeMB', 'scraped_at']
+            'FileSizeMB', 'scraped_at'
+        ]
 
     # 3. Main Loop
     try:
@@ -210,16 +257,12 @@ def run_main_pipeline(df_examples):
                 }
                 batch_data.append(final_row)
                 
-                # 4. Batch Commit (ย้ายเข้ามาอยู่ใน Loop แล้ว)
+                # 4. Batch Commit
                 if len(batch_data) >= 20:
                     batch_df = pd.DataFrame(batch_data)
-                    # fill missing columns
-                    for col in cols:
-                        if col not in batch_df.columns:
-                            batch_df[col] = None
-                    batch_df = batch_df[cols] # บังคับลำดับคอลัมน์
+                    batch_df = batch_df.reindex(columns=cols)
                     conn.execute("INSERT INTO raw_product_details SELECT * FROM batch_df ON CONFLICT DO NOTHING")
-                    batch_data = [] 
+                    batch_data = []
                     
             except Exception as e:
                 print(f"\n❌ Error ID {p_id}: {e}")
