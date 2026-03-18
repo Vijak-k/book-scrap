@@ -1,4 +1,4 @@
-WITH prod_type AS (
-    SELECT * FROM {{ ref('product_type') }}
-)
-SELECT * FROM prod_type;
+SELECT
+    CAST(product_type_id AS INT) AS product_type_id,
+    product_type_description
+FROM {{ ref('product_type') }}

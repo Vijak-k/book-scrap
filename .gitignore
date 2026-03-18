@@ -210,6 +210,7 @@ __marimo__/
 
 # Data & Database (ห้ามลืม!)
 *.duckdb
+*.duckdb.wal
 *.db
 *.csv
 *.xlsx

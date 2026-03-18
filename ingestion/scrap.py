@@ -111,7 +111,7 @@ def scrape(url):
     }
     
     try:
-        time.sleep(random.uniform(0.8,1.2))
+        time.sleep(random.uniform(1.0,2.0))
         response = requests.get(url, headers=headers, timeout=10)
         data['status_code'] = response.status_code
         
