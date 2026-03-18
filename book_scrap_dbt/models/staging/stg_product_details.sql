@@ -4,13 +4,18 @@ WITH source AS (
 clean AS (
   SELECT
     product_id,
-    title,
-    CASE WHEN Price_Full = 'N/A' THEN 0
+    CASE WHEN title = 'N/A' THEN NULL ELSE title END AS title,
+    CASE
+      WHEN (title = 'N/A' AND Price_Full = 'N/A') THEN NULL
+      WHEN (title != 'N/A' AND Price_Full = 'N/A') THEN 0
       ELSE CAST(Price_Full AS INT) END AS price,
-    Barcode AS barcode,
-    CASE WHEN Release_Date = 'N/A' THEN NULL
-      ELSE CAST(Release_Date AS DATE) END AS release_date,
-    keywords, -- เก็บไว้เพื่อตรวจสอบ
+    CASE WHEN barcode = 'N/A' THEN NULL ELSE barcode END AS barcode,
+    CASE WHEN Release_Date = 'N/A' THEN NULL ELSE CAST(Release_Date AS DATE) END AS release_date,
+    CASE WHEN keywords = 'N/A' THEN NULL ELSE keywords END AS keywords, -- เก็บไว้เพื่อตรวจสอบ
+    CASE WHEN author = 'N/A' THEN NULL ELSE author END AS author,
+    CASE WHEN publisher = 'N/A' THEN NULL ELSE publisher END AS publisher,
+    CASE WHEN category_lv1 = 'N/A' THEN NULL ELSE category_lv1 END AS category_lv1,
+    CASE WHEN category_lv2 = 'N/A' THEN NULL ELSE category_lv2 END AS category_lv2,
     AverageRating AS average_rating,
     TotalRating AS rating_count,
     NumberOfPage AS number_of_page,
@@ -22,41 +27,6 @@ clean AS (
     scraped_at AS scrape_at,
     url AS url
   FROM source
-  WHERE status_code = 200
-),
-split_keywords AS (
-  SELECT 
-    *,
-    -- แยกข้อความด้วย comma และตัดช่องว่างส่วนเกินออก (trim)
-    string_split(keywords, ',') as kw_list
-  FROM clean
+  WHERE Price_Full = 'N/A'
 )
-SELECT
-  product_id,
-  title,
-  -- ดึงตามลำดับที่คุณระบุ (Index 1-5 และที่เหลือคือ Tags)
-  trim(kw_list[1]) as kw_title,
-  trim(kw_list[2]) as kw_author,
-  trim(kw_list[3]) as kw_publisher,
-  trim(kw_list[4]) as kw_cat_lv1,
-  trim(kw_list[5]) as kw_cat_lv2,
-  trim(kw_list[6]) as tag1,
-  trim(kw_list[7]) as tag2,
-  trim(kw_list[8]) as tag3,
-  trim(kw_list[9]) as tag4,
-  trim(kw_list[10]) as tag5,
-  trim(kw_list[11]) as tag6,
-  trim(kw_list[12]) as tag7,
-  trim(kw_list[13]) as tag8,
-  trim(kw_list[14]) as tag9,
-  trim(kw_list[15]) as tag10,
-  price,
-  barcode,
-  release_date,
-  average_rating,
-  rating_count,
-  number_of_page,
-  scrape_at,
-  url
-FROM split_keywords
-WHERE trim(kw_list[15]) IS NOT NULL;
+SELECT * FROM clean
