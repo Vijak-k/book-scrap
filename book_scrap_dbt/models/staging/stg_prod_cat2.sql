@@ -5,4 +5,4 @@ SELECT
     category_2_title,
     CAST(status_code AS INT) AS status_code,
     url
-FROM {{ ref('prod_cat_lv2') }};
+FROM {{ ref('prod_cat_lv2') }}

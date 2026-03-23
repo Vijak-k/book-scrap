@@ -220,3 +220,5 @@ backup_*.csv
 .vscode/
 .idea/
 >>>>>>> b8a3030 (initial commit: create ingestion folder and add notebook to get product category title)
+
+.bruin.yml
