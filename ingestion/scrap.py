@@ -88,7 +88,7 @@ def extract_extra_info(html_content):
         
     return extra_data
 
-def scrape(url):
+def scrape(url, session):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': 'https://www.naiin.com/',
@@ -111,8 +111,8 @@ def scrape(url):
     }
     
     try:
-        time.sleep(random.uniform(2.2,2.6))
-        response = requests.get(url, headers=headers, timeout=10)
+        time.sleep(random.uniform(1.2,1.6))
+        response = session.get(url, headers=headers, timeout=15)
         data['status_code'] = response.status_code
         
         # ถ้า status ไม่ใช่ 200 (เช่น 404) ให้คืนค่าเลย ไม่ต้องเสียเวลา parse
@@ -243,13 +243,16 @@ def run_main_pipeline(df_examples):
         ]
 
     # 3. Main Loop
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=10)
+    session.mount('https://', adapter)
     try:
         for _, row in tqdm(targets.iterrows(), total=len(targets), desc="Scraping"):
             p_id = row['product_id']
             url = row['url']
             
             try:
-                res = scrape(url) 
+                res = scrape(url, session) 
                 final_row = {
                     'product_id': p_id,
                     **res,
